@@ -2,19 +2,6 @@ syntax = "proto3";
 package model;
 option go_package = "model";
 
-enum Source {
-  Unknown = 0;
-  LRU = 1;
-  Redis = 2;
-}
-
-enum ErrCode {
-  Success = 0;
-  RedisError = 1;
-  LoaderError = 2;
-  DataError = 3;
-}
-
 message Data {
   string raw = 1;
   int64 modify_time_ms = 2;

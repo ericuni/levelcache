@@ -18,55 +18,6 @@ import proto "github.com/golang/protobuf/proto"
 // Reference imports to suppress errors if they are not otherwise used.
 var _ = proto.Marshal
 
-type Source int32
-
-const (
-	Source_Unknown Source = 0
-	Source_LRU     Source = 1
-	Source_Redis   Source = 2
-)
-
-var Source_name = map[int32]string{
-	0: "Unknown",
-	1: "LRU",
-	2: "Redis",
-}
-var Source_value = map[string]int32{
-	"Unknown": 0,
-	"LRU":     1,
-	"Redis":   2,
-}
-
-func (x Source) String() string {
-	return proto.EnumName(Source_name, int32(x))
-}
-
-type ErrCode int32
-
-const (
-	ErrCode_Success     ErrCode = 0
-	ErrCode_RedisError  ErrCode = 1
-	ErrCode_LoaderError ErrCode = 2
-	ErrCode_DataError   ErrCode = 3
-)
-
-var ErrCode_name = map[int32]string{
-	0: "Success",
-	1: "RedisError",
-	2: "LoaderError",
-	3: "DataError",
-}
-var ErrCode_value = map[string]int32{
-	"Success":     0,
-	"RedisError":  1,
-	"LoaderError": 2,
-	"DataError":   3,
-}
-
-func (x ErrCode) String() string {
-	return proto.EnumName(ErrCode_name, int32(x))
-}
-
 type Data struct {
 	Raw          string `protobuf:"bytes,1,opt,name=raw" json:"raw,omitempty"`
 	ModifyTimeMs int64  `protobuf:"varint,2,opt,name=modify_time_ms" json:"modify_time_ms,omitempty"`
@@ -75,8 +26,3 @@ type Data struct {
 func (m *Data) Reset()         { *m = Data{} }
 func (m *Data) String() string { return proto.CompactTextString(m) }
 func (*Data) ProtoMessage()    {}
-
-func init() {
-	proto.RegisterEnum("model.Source", Source_name, Source_value)
-	proto.RegisterEnum("model.ErrCode", ErrCode_name, ErrCode_value)
-}
