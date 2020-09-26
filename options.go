@@ -12,7 +12,7 @@ import (
 type Options struct {
 	LRUCacheOptions   *LRUCacheOptions
 	RedisCacheOptions *RedisCacheOptions
-	Loader            func(ctx context.Context, keys []string) (map[string]string, error)
+	Loader            func(ctx context.Context, keys []string) (map[string][]byte, error)
 }
 
 // LRUCacheOptions lru cache options

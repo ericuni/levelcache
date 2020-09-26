@@ -9,10 +9,10 @@ import (
 type Cache interface {
 	// if error is not nil, user decide whether to use expired values
 	// second map, true for valid and false for expired
-	MGet(ctx context.Context, keys []string) (map[string]string, map[string]bool, error)
+	MGet(ctx context.Context, keys []string) (map[string][]byte, map[string]bool, error)
 
 	//  warm up cache
-	MSet(ctx context.Context, kvs map[string]string) error
+	MSet(ctx context.Context, kvs map[string][]byte) error
 }
 
 // NewCache create a new cache

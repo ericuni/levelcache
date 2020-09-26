@@ -13,12 +13,12 @@ import (
 var (
 	client *redis.Client
 	kvs    = map[string]string{"a": "va", "b": "vb", "c": "vc"}
-	loader = func(ctx context.Context, keys []string) (map[string]string, error) {
-		values := make(map[string]string, len(keys))
+	loader = func(ctx context.Context, keys []string) (map[string][]byte, error) {
+		values := make(map[string][]byte, len(keys))
 		for _, key := range keys {
 			v, ok := kvs[key]
 			if ok {
-				values[key] = v
+				values[key] = []byte(v)
 			}
 		}
 		return values, nil
@@ -43,7 +43,7 @@ func TestCache_OnlyLRU(t *testing.T) {
 			Timeout:     500 * time.Millisecond,
 			MissTimeout: 100 * time.Millisecond,
 		},
-		Loader: func(ctx context.Context, keys []string) (map[string]string, error) {
+		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
 			t.Logf("load keys: %v", keys)
 			return loader(ctx, keys)
 		},
@@ -54,7 +54,8 @@ func TestCache_OnlyLRU(t *testing.T) {
 
 	mget := func(keys []string) (map[string]string, map[string]bool, error) {
 		t.Logf("req: keys %v", keys)
-		values, valids, err := cache.MGet(ctx, keys)
+		raw, valids, err := cache.MGet(ctx, keys)
+		values := convert(raw)
 		t.Logf("rsp: values %v, valids %v, err %v\n\n", values, valids, err)
 		return values, valids, err
 	}
@@ -128,7 +129,7 @@ func TestCache_OnlyRedis(t *testing.T) {
 			SoftTimeout: 1 * time.Second,
 			MissTimeout: 200 * time.Millisecond,
 		},
-		Loader: func(ctx context.Context, keys []string) (map[string]string, error) {
+		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
 			t.Logf("load keys: %v", keys)
 			return loader(ctx, keys)
 		},
@@ -139,7 +140,8 @@ func TestCache_OnlyRedis(t *testing.T) {
 
 	mget := func(keys []string) (map[string]string, map[string]bool, error) {
 		t.Logf("req: %v", keys)
-		values, valids, err := cache.MGet(ctx, keys)
+		raw, valids, err := cache.MGet(ctx, keys)
+		values := convert(raw)
 		t.Logf("rsp: values %v, valids %v, err %v\n\n", values, valids, err)
 		return values, valids, err
 	}
@@ -226,7 +228,7 @@ func TestCache_LRUAndRedis(t *testing.T) {
 			SoftTimeout: 1 * time.Second,
 			MissTimeout: 200 * time.Millisecond,
 		},
-		Loader: func(ctx context.Context, keys []string) (map[string]string, error) {
+		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
 			t.Logf("load keys: %v", keys)
 			return loader(ctx, keys)
 		},
@@ -237,7 +239,8 @@ func TestCache_LRUAndRedis(t *testing.T) {
 
 	mget := func(keys []string) (map[string]string, map[string]bool, error) {
 		t.Logf("req: %v", keys)
-		values, valids, err := cache.MGet(ctx, keys)
+		raw, valids, err := cache.MGet(ctx, keys)
+		values := convert(raw)
 		t.Logf("rsp: values %v, valids %v, err %v\n\n", values, valids, err)
 		return values, valids, err
 	}
@@ -283,4 +286,12 @@ func reset() {
 		client.Del(k)
 	}
 	client.Del("d")
+}
+
+func convert(kvs map[string][]byte) map[string]string {
+	res := make(map[string]string, len(kvs))
+	for k, v := range kvs {
+		res[k] = string(v)
+	}
+	return res
 }

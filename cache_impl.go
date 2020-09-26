@@ -7,7 +7,6 @@ import (
 
 	"github.com/ericuni/errs"
 	"github.com/ericuni/glog"
-	"github.com/ericuni/gocode/common/str"
 	"github.com/ericuni/levelcache/model"
 	"github.com/go-redis/redis"
 	"github.com/golang/protobuf/proto"
@@ -36,12 +35,12 @@ func newCacheImpl(name string, options *Options) *cacheImpl {
 	return c
 }
 
-func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string]string, map[string]bool, error) {
+func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string][]byte, map[string]bool, error) {
 	if len(keys) == 0 {
 		return nil, nil, nil
 	}
 
-	valuesMap := make(map[string]string, len(keys))
+	valuesMap := make(map[string][]byte, len(keys))
 	validsMap := make(map[string]bool, len(keys))
 
 	missKeys := cache.mGetFromLRUCache(ctx, keys, valuesMap, validsMap)
@@ -80,7 +79,7 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string]str
 	return valuesMap, validsMap, nil
 }
 
-func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string]string,
+func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
 	validsMap map[string]bool) []string {
 	if cache.options.LRUCacheOptions == nil {
 		return keys
@@ -97,7 +96,7 @@ func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, val
 				continue
 			}
 
-			// loader miss
+			// loader once missed, so we return like it missed
 			if bytes.Compare(bs, missBytes) == 0 {
 				continue
 			}
@@ -121,7 +120,7 @@ func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, val
 	return missKeys
 }
 
-func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, valuesMap map[string]string,
+func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
 	validsMap map[string]bool) []string {
 	options := cache.options.RedisCacheOptions
 
@@ -142,19 +141,19 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 
 	now := time.Now()
 	for i, key := range keys {
-		v, err := cmds[i].Result()
+		v, err := cmds[i].Bytes()
 		if err != nil {
 			missKeys = append(missKeys, key)
 			continue
 		}
 
 		// loader miss
-		if bytes.Compare(str.ToReadOnlyBytes(v), missBytes) == 0 {
+		if bytes.Compare(v, missBytes) == 0 {
 			continue
 		}
 
 		data := model.Data{}
-		err = proto.Unmarshal(toReadOnlyBytes(v), &data)
+		err = proto.Unmarshal(v, &data)
 		if err != nil {
 			missKeys = append(missKeys, key)
 			glog.Errorf("[%v] redis data format error", key)
@@ -176,11 +175,11 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 	return missKeys
 }
 
-func (cache *cacheImpl) MSet(ctx context.Context, kvs map[string]string) error {
+func (cache *cacheImpl) MSet(ctx context.Context, kvs map[string][]byte) error {
 	return cache.mSet(ctx, kvs, nil)
 }
 
-func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string]string, missKeys []string) error {
+func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
 	if len(kvs) == 0 && len(missKeys) == 0 {
 		return nil
 	}

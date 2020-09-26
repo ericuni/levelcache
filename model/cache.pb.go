@@ -19,7 +19,7 @@ import proto "github.com/golang/protobuf/proto"
 var _ = proto.Marshal
 
 type Data struct {
-	Raw        string `protobuf:"bytes,1,opt,name=raw" json:"raw,omitempty"`
+	Raw        []byte `protobuf:"bytes,1,opt,name=raw,proto3" json:"raw,omitempty"`
 	ModifyTime int64  `protobuf:"varint,2,opt,name=modify_time" json:"modify_time,omitempty"`
 }
 
