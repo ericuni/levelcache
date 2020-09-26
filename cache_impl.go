@@ -1,11 +1,13 @@
 package levelcache
 
 import (
+	"bytes"
 	"context"
 	"time"
 
 	"github.com/ericuni/errs"
 	"github.com/ericuni/glog"
+	"github.com/ericuni/gocode/common/str"
 	"github.com/ericuni/levelcache/model"
 	"github.com/go-redis/redis"
 	"github.com/golang/protobuf/proto"
@@ -41,103 +43,19 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string]str
 
 	valuesMap := make(map[string]string, len(keys))
 	validsMap := make(map[string]bool, len(keys))
-	var missKeys []string
 
-	if cache.options.LRUCacheOptions != nil {
-		for _, key := range keys {
-			item := cache.lruData.Get(key)
-			if item != nil {
-				bs, ok := item.Value().([]byte)
-				if !ok {
-					missKeys = append(missKeys, key)
-					glog.Errorln("wrong data type")
-					continue
-				}
-
-				// loader miss
-				if len(bs) == 0 {
-					continue
-				}
-
-				data := model.Data{}
-				err := proto.Unmarshal(bs, &data)
-				if err != nil {
-					missKeys = append(missKeys, key)
-					glog.Errorln("wrong data content")
-					continue
-				}
-
-				valuesMap[key] = data.Raw
-				if !item.Expired() {
-					validsMap[key] = true
-					continue
-				}
-			}
-			missKeys = append(missKeys, key)
-		}
-	} else {
-		missKeys = keys
-	}
-	if len(missKeys) == 0 {
-		return valuesMap, validsMap, nil
-	}
-
-	if cache.options.RedisCacheOptions != nil {
-		options := cache.options.RedisCacheOptions
-		keys = missKeys
-		missKeys = nil
-
-		func() {
-			pipe := options.Client.Pipeline()
-			defer pipe.Close()
-
-			cmds := make([]*redis.StringCmd, 0, len(keys))
-			for _, key := range keys {
-				cmds = append(cmds, pipe.Get(cache.mkRedisKey(key)))
-			}
-			pipe.Exec()
-
-			now := time.Now()
-			for i, key := range keys {
-				v, err := cmds[i].Result()
-				if err != nil {
-					missKeys = append(missKeys, key)
-					continue
-				}
-
-				// loader miss
-				if v == "" {
-					continue
-				}
-
-				data := model.Data{}
-				err = proto.Unmarshal(toReadOnlyBytes(v), &data)
-				if err != nil {
-					missKeys = append(missKeys, key)
-					glog.Errorf("[%v] redis data format error", key)
-					continue
-				}
-
-				if now.Sub(time.Unix(data.ModifyTimeMs/1e3, (data.ModifyTimeMs%1e3)*1e6)) <= options.SoftTimeout {
-					valuesMap[key] = data.Raw
-					validsMap[key] = true
-					continue
-				}
-
-				// lrucache expired has higher priority over redis cache soft expired
-				if _, ok := valuesMap[key]; !ok {
-					valuesMap[key] = data.Raw
-				}
-				missKeys = append(missKeys, key)
-			}
-		}()
-	}
+	missKeys := cache.mGetFromLRUCache(ctx, keys, valuesMap, validsMap)
 	if len(missKeys) == 0 {
 		return valuesMap, validsMap, nil
 	}
 
 	keys = missKeys
-	missKeys = nil
+	missKeys = cache.mGetFromRedisCache(ctx, keys, valuesMap, validsMap)
+	if len(missKeys) == 0 {
+		return valuesMap, validsMap, nil
+	}
+
+	keys = missKeys
 	values, err := cache.options.Loader(ctx, keys)
 	if err != nil {
 		return valuesMap, validsMap, errs.Trace(err)
@@ -152,6 +70,7 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string]str
 		return valuesMap, validsMap, errs.Trace(err)
 	}
 
+	missKeys = nil
 	for _, key := range keys {
 		_, ok := values[key]
 		if !ok {
@@ -163,6 +82,102 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string]str
 	}
 
 	return valuesMap, validsMap, nil
+}
+
+func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string]string,
+	validsMap map[string]bool) []string {
+	if cache.options.LRUCacheOptions == nil {
+		return keys
+	}
+
+	var missKeys []string
+	for _, key := range keys {
+		item := cache.lruData.Get(key)
+		if item != nil {
+			bs, ok := item.Value().([]byte)
+			if !ok {
+				missKeys = append(missKeys, key)
+				glog.Errorln("wrong data type")
+				continue
+			}
+
+			// loader miss
+			if bytes.Compare(bs, missBytes) == 0 {
+				continue
+			}
+
+			data := model.Data{}
+			err := proto.Unmarshal(bs, &data)
+			if err != nil {
+				missKeys = append(missKeys, key)
+				glog.Errorln("wrong data content")
+				continue
+			}
+
+			valuesMap[key] = data.Raw
+			if !item.Expired() {
+				validsMap[key] = true
+				continue
+			}
+		}
+		missKeys = append(missKeys, key)
+	}
+	return missKeys
+}
+
+func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, valuesMap map[string]string,
+	validsMap map[string]bool) []string {
+	options := cache.options.RedisCacheOptions
+
+	if options == nil {
+		return keys
+	}
+
+	var missKeys []string
+
+	pipe := options.Client.Pipeline()
+	defer pipe.Close()
+
+	cmds := make([]*redis.StringCmd, 0, len(keys))
+	for _, key := range keys {
+		cmds = append(cmds, pipe.Get(cache.mkRedisKey(key)))
+	}
+	pipe.Exec()
+
+	now := time.Now()
+	for i, key := range keys {
+		v, err := cmds[i].Result()
+		if err != nil {
+			missKeys = append(missKeys, key)
+			continue
+		}
+
+		// loader miss
+		if bytes.Compare(str.ToReadOnlyBytes(v), missBytes) == 0 {
+			continue
+		}
+
+		data := model.Data{}
+		err = proto.Unmarshal(toReadOnlyBytes(v), &data)
+		if err != nil {
+			missKeys = append(missKeys, key)
+			glog.Errorf("[%v] redis data format error", key)
+			continue
+		}
+
+		if now.Sub(time.Unix(data.ModifyTimeMs/1e3, (data.ModifyTimeMs%1e3)*1e6)) <= options.SoftTimeout {
+			valuesMap[key] = data.Raw
+			validsMap[key] = true
+			continue
+		}
+
+		// lrucache expired has higher priority over redis cache soft expired
+		if _, ok := valuesMap[key]; !ok {
+			valuesMap[key] = data.Raw
+		}
+		missKeys = append(missKeys, key)
+	}
+	return missKeys
 }
 
 func (cache *cacheImpl) MSet(ctx context.Context, kvs map[string]string) error {
