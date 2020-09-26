@@ -4,6 +4,6 @@ option go_package = "model";
 
 message Data {
   string raw = 1;
-  int64 modify_time_ms = 2;
+  int64 modify_time = 2; // timestamp in seconds
 }
 

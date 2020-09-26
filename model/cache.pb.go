@@ -19,8 +19,8 @@ import proto "github.com/golang/protobuf/proto"
 var _ = proto.Marshal
 
 type Data struct {
-	Raw          string `protobuf:"bytes,1,opt,name=raw" json:"raw,omitempty"`
-	ModifyTimeMs int64  `protobuf:"varint,2,opt,name=modify_time_ms" json:"modify_time_ms,omitempty"`
+	Raw        string `protobuf:"bytes,1,opt,name=raw" json:"raw,omitempty"`
+	ModifyTime int64  `protobuf:"varint,2,opt,name=modify_time" json:"modify_time,omitempty"`
 }
 
 func (m *Data) Reset()         { *m = Data{} }

@@ -161,7 +161,7 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 			continue
 		}
 
-		if now.Sub(time.Unix(data.ModifyTimeMs/1e3, (data.ModifyTimeMs%1e3)*1e6)) <= options.SoftTimeout {
+		if now.Sub(time.Unix(data.ModifyTime, 0)) <= options.SoftTimeout {
 			valuesMap[key] = data.Raw
 			validsMap[key] = true
 			continue
@@ -185,13 +185,13 @@ func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string]string, missKey
 		return nil
 	}
 
-	modifyTimeMs := time.Now().UnixNano() / 1e6
+	modifyTimeMs := time.Now().Unix()
 
 	if options := cache.options.LRUCacheOptions; options != nil {
 		for k, v := range kvs {
 			data := model.Data{
-				Raw:          v,
-				ModifyTimeMs: modifyTimeMs,
+				Raw:        v,
+				ModifyTime: modifyTimeMs,
 			}
 			bs, _ := proto.Marshal(&data)
 			cache.lruData.Set(k, bs, options.Timeout)
@@ -209,8 +209,8 @@ func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string]string, missKey
 			var cmds []*redis.StatusCmd
 			for k, v := range kvs {
 				data := model.Data{
-					Raw:          v,
-					ModifyTimeMs: modifyTimeMs,
+					Raw:        v,
+					ModifyTime: modifyTimeMs,
 				}
 				bs, _ := proto.Marshal(&data)
 				cmds = append(cmds, pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout))
