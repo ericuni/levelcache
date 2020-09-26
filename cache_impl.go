@@ -197,7 +197,7 @@ func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string]string, missKey
 			cache.lruData.Set(k, bs, options.Timeout)
 		}
 
-		for i := 0; i < len(missKeys) && options.MissTimeout.Milliseconds() > 0; i++ {
+		for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
 			cache.lruData.Set(missKeys[i], missBytes, options.MissTimeout)
 		}
 	}

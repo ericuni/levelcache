@@ -18,25 +18,13 @@ type Cache interface {
 // NewCache create a new cache
 // panic if options invalid
 func NewCache(name string, options *Options) Cache {
-	if name == "" || options == nil ||
-		(options.LRUCacheOptions == nil && options.RedisCacheOptions == nil) ||
-		options.Loader == nil {
-		panic(errors.New("name or options invalid"))
+	if name == "" {
+		panic(errors.New("name empty"))
 	}
 
-	if options := options.LRUCacheOptions; options != nil {
-		if options.Size <= 0 {
-			panic(errors.New("lrucache size invalid"))
-		}
+	if err := options.isValid(); err != nil {
+		panic(err)
 	}
 
-	if options := options.RedisCacheOptions; options != nil {
-		if options.Client == nil {
-			panic(errors.New("redis client invalid"))
-		}
-		if options.Prefix == "" {
-			panic(errors.New("redis prefix invalid"))
-		}
-	}
 	return newCacheImpl(name, options)
 }
