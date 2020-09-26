@@ -184,52 +184,69 @@ func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string][]byte, missKey
 		return nil
 	}
 
-	modifyTimeMs := time.Now().Unix()
+	cache.mSetLRUCache(ctx, kvs, missKeys)
 
-	if options := cache.options.LRUCacheOptions; options != nil {
-		for k, v := range kvs {
-			data := model.Data{
-				Raw:        v,
-				ModifyTime: modifyTimeMs,
-			}
-			bs, _ := proto.Marshal(&data)
-			cache.lruData.Set(k, bs, options.Timeout)
-		}
-
-		for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
-			cache.lruData.Set(missKeys[i], missBytes, options.MissTimeout)
-		}
+	if err := cache.mSetRedisCache(ctx, kvs, missKeys); err != nil {
+		return errs.Trace(err)
 	}
 
-	if options := cache.options.RedisCacheOptions; options != nil {
-		err := func() error {
-			pipe := options.Client.Pipeline()
-			defer pipe.Close()
-			var cmds []*redis.StatusCmd
-			for k, v := range kvs {
-				data := model.Data{
-					Raw:        v,
-					ModifyTime: modifyTimeMs,
-				}
-				bs, _ := proto.Marshal(&data)
-				cmds = append(cmds, pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout))
-			}
+	return nil
+}
 
-			for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
-				cmds = append(cmds, pipe.Set(cache.mkRedisKey(missKeys[i]), missBytes, options.HardTimeout))
-			}
+func (cache *cacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte, missKeys []string) {
+	options := cache.options.LRUCacheOptions
+	if options == nil {
+		return
+	}
 
-			_, err := pipe.Exec()
-			if err != nil {
-				return errs.Trace(err)
-			}
-			return nil
-		}()
-		if err != nil {
-			return errs.Trace(err)
+	now := time.Now().Unix()
+	for k, v := range kvs {
+		data := model.Data{
+			Raw:        v,
+			ModifyTime: now,
 		}
+		bs, _ := proto.Marshal(&data)
+		cache.lruData.Set(k, bs, options.Timeout)
+	}
+
+	if options.MissTimeout == 0 {
+		return
+	}
+
+	for _, key := range missKeys {
+		cache.lruData.Set(key, missBytes, options.MissTimeout)
+	}
+}
+
+func (cache *cacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
+	options := cache.options.RedisCacheOptions
+	if options == nil {
+		return nil
+	}
+
+	now := time.Now().Unix()
+	pipe := options.Client.Pipeline()
+	defer pipe.Close()
+	var cmds []*redis.StatusCmd
+	for k, v := range kvs {
+		data := model.Data{
+			Raw:        v,
+			ModifyTime: now,
+		}
+		bs, _ := proto.Marshal(&data)
+		cmds = append(cmds, pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout))
+	}
+
+	for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
+		cmds = append(cmds, pipe.Set(cache.mkRedisKey(missKeys[i]), missBytes, options.HardTimeout))
+	}
+
+	_, err := pipe.Exec()
+	if err != nil {
+		return errs.Trace(err)
 	}
 	return nil
+
 }
 
 func (cache *cacheImpl) mkRedisKey(key string) string {
