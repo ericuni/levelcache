@@ -96,8 +96,11 @@ func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, val
 				continue
 			}
 
-			// loader once missed, so we return like it missed
+			// loader once missed, so we return like it missed, but if already expired, we need to try next level
 			if bytes.Compare(bs, missBytes) == 0 {
+				if item.Expired() {
+					missKeys = append(missKeys, key)
+				}
 				continue
 			}
 
@@ -254,4 +257,28 @@ func (cache *cacheImpl) mkRedisKey(key string) string {
 		return options.Prefix + "_" + key
 	}
 	return key
+}
+
+func (cache *cacheImpl) MDel(ctx context.Context, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+
+	if options := cache.options.LRUCacheOptions; options != nil {
+		for _, key := range keys {
+			cache.lruData.Delete(key)
+		}
+	}
+
+	if options := cache.options.RedisCacheOptions; options != nil {
+		var redisKeys []string
+		for _, key := range keys {
+			redisKeys = append(redisKeys, cache.mkRedisKey(key))
+		}
+		err := options.Client.Del(redisKeys...).Err()
+		if err != nil {
+			return errs.Trace(err)
+		}
+	}
+	return nil
 }

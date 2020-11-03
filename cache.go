@@ -13,6 +13,9 @@ type Cache interface {
 
 	//  warm up cache
 	MSet(ctx context.Context, kvs map[string][]byte) error
+
+	// delete keys from cache, include local cache and redis cache.
+	MDel(ctx context.Context, keys []string) error
 }
 
 // NewCache create a new cache
