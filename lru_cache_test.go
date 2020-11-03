@@ -94,7 +94,8 @@ func (s *LRUCacheSuite) TestHitLoader() {
 	value := "va"
 
 	t.Run("hittable loader", func(t *testing.T) {
-		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
+		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
+			error) {
 			s.hits = keys
 			return map[string][]byte{key: []byte(value)}, nil
 		})
@@ -148,7 +149,8 @@ func (s *LRUCacheSuite) TestHitLoader() {
 	})
 
 	t.Run("loader error", func(t *testing.T) {
-		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
+		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
+			error) {
 			s.hits = keys
 			return nil, errors.New("loader error")
 		})
@@ -203,7 +205,8 @@ func (s *LRUCacheSuite) TestMiss() {
 	})
 
 	t.Run("hittable loader", func(t *testing.T) {
-		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
+		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
+			error) {
 			s.hits = keys
 			return map[string][]byte{key: []byte(value)}, nil
 		})
@@ -271,6 +274,7 @@ func (s *LRUCacheSuite) TestFull() {
 	}
 
 	patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
+		t.Logf("arrive at loader: %v", keys)
 		s.hits = keys
 		values := make(map[string][]byte, len(keys))
 		for _, key := range keys {
