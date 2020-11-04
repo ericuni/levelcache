@@ -311,7 +311,7 @@ func (s *LRUCacheSuite) TestFull() {
 		}
 	})
 
-	// give lrucache gc some time
+	// give lrucache async gc some time
 	time.Sleep(time.Millisecond * 10)
 
 	t.Run("get a evicted key", func(t *testing.T) {
