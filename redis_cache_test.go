@@ -145,7 +145,6 @@ func (s *RedisCacheSuite) TestHitLoader() {
 	t.Run("hittable loader", func(t *testing.T) {
 		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
 			error) {
-			t.Logf("arrive at loader: %v", keys)
 			s.hits = keys
 			return map[string][]byte{key: []byte(value)}, nil
 		})
