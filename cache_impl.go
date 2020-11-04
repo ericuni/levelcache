@@ -244,7 +244,7 @@ func (cache *CacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byt
 	}
 
 	for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
-		cmds = append(cmds, pipe.Set(cache.mkRedisKey(missKeys[i]), missBytes, options.HardTimeout))
+		cmds = append(cmds, pipe.Set(cache.mkRedisKey(missKeys[i]), missBytes, options.MissTimeout))
 	}
 
 	_, err := pipe.Exec()

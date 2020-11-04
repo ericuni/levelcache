@@ -34,99 +34,6 @@ func init() {
 	reset()
 }
 
-func TestCache_OnlyRedis(t *testing.T) {
-	defer reset()
-	assert := assert.New(t)
-
-	options := levelcache.Options{
-		RedisCacheOptions: &levelcache.RedisCacheOptions{
-			Client:      client,
-			Prefix:      "prefix",
-			HardTimeout: 2 * time.Second,
-			SoftTimeout: 1 * time.Second,
-			MissTimeout: 200 * time.Millisecond,
-		},
-		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
-			t.Logf("load keys: %v", keys)
-			return loader(ctx, keys)
-		},
-	}
-
-	cache := levelcache.NewCache("redis", &options)
-	ctx := context.Background()
-
-	mget := func(keys []string) (map[string]string, map[string]bool, error) {
-		t.Logf("req: %v", keys)
-		raw, valids, err := cache.MGet(ctx, keys)
-		values := convert(raw)
-		t.Logf("rsp: values %v, valids %v, err %v\n\n", values, valids, err)
-		return values, valids, err
-	}
-
-	// hit loader
-	{
-		keys := []string{"a", "b", "c"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		for _, key := range keys {
-			assert.Equal(kvs[key], values[key])
-			assert.True(valids[key])
-		}
-	}
-
-	// hit cache
-	{
-		keys := []string{"a", "b", "c"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		for _, key := range keys {
-			assert.Equal(kvs[key], values[key])
-			assert.True(valids[key])
-		}
-	}
-
-	// get a new key, would hit loader, but miss
-	{
-		keys := []string{"d"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		assert.Empty(values)
-		assert.Empty(valids)
-	}
-
-	// get d again, hit cache
-	{
-		keys := []string{"d"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		assert.Empty(values[keys[0]])
-		assert.False(valids[keys[0]])
-	}
-
-	// miss timeout, will trigger load again
-	{
-		t.Log("sleep miss timeout")
-		time.Sleep(options.RedisCacheOptions.MissTimeout + 10*time.Millisecond)
-		keys := []string{"d"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		assert.Empty(values)
-		assert.Empty(valids)
-	}
-
-	// soft timeout, will trigger load again
-	{
-		t.Log("sleep soft timeout")
-		time.Sleep(options.RedisCacheOptions.SoftTimeout + 10*time.Millisecond)
-		keys := []string{"a"}
-		values, valids, err := mget(keys)
-		assert.Nil(err)
-		key := keys[0]
-		assert.Equal(kvs[key], values[key])
-		assert.True(valids[key])
-	}
-}
-
 // go test -v -run LRUAndRedis
 func TestCache_LRUAndRedis(t *testing.T) {
 	defer reset()
@@ -203,12 +110,4 @@ func reset() {
 		client.Del(k)
 	}
 	client.Del("d")
-}
-
-func convert(kvs map[string][]byte) map[string]string {
-	res := make(map[string]string, len(kvs))
-	for k, v := range kvs {
-		res[k] = string(v)
-	}
-	return res
 }
