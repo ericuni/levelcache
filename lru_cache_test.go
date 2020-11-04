@@ -274,7 +274,6 @@ func (s *LRUCacheSuite) TestFull() {
 	}
 
 	patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
-		t.Logf("arrive at loader: %v", keys)
 		s.hits = keys
 		values := make(map[string][]byte, len(keys))
 		for _, key := range keys {
@@ -298,7 +297,7 @@ func (s *LRUCacheSuite) TestFull() {
 		}
 	})
 
-	t.Run("get a new key", func(t *testing.T) {
+	t.Run("get new keys", func(t *testing.T) {
 		keys := []string{"xa", "xb", "xc"}
 
 		s.hits = nil
@@ -312,7 +311,10 @@ func (s *LRUCacheSuite) TestFull() {
 		}
 	})
 
-	t.Run("get evicted key", func(t *testing.T) {
+	// give lrucache gc some time
+	time.Sleep(time.Millisecond * 10)
+
+	t.Run("get a evicted key", func(t *testing.T) {
 		key := "a"
 
 		s.hits = nil
