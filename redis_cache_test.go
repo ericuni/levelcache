@@ -24,7 +24,7 @@ func (s *RedisCacheSuite) SetupSuite() {
 
 	options := levelcache.Options{
 		RedisCacheOptions: &levelcache.RedisCacheOptions{
-			Client:      client,
+			Client:      getRedisClient(),
 			Prefix:      "levelcache.test.redis",
 			HardTimeout: 1000 * time.Millisecond,
 			SoftTimeout: 800 * time.Millisecond,

@@ -2,8 +2,10 @@ package levelcache_test
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ericuni/levelcache"
+	"github.com/go-redis/redis"
 )
 
 type LevelCacheTest struct {
@@ -29,4 +31,16 @@ func convert(kvs map[string][]byte) map[string]string {
 		res[k] = string(v)
 	}
 	return res
+}
+
+func getRedisClient() *redis.Client {
+	client := redis.NewClient(&redis.Options{
+		Addr:     "localhost:6379",
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+	if client == nil {
+		panic(errors.New("init redis client error"))
+	}
+	return client
 }

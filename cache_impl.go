@@ -207,6 +207,7 @@ func (cache *CacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte,
 
 	now := time.Now().Unix()
 	for k, v := range kvs {
+		glog.Infoln("set lru cache", k)
 		data := model.Data{
 			Raw:        v,
 			ModifyTime: now,
@@ -220,6 +221,7 @@ func (cache *CacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte,
 	}
 
 	for _, key := range missKeys {
+		glog.Infoln("set lru miss cache", key)
 		cache.lruData.Set(key, missBytes, options.MissTimeout)
 	}
 }
@@ -235,6 +237,7 @@ func (cache *CacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byt
 	defer pipe.Close()
 	var cmds []*redis.StatusCmd
 	for k, v := range kvs {
+		glog.Infoln("set redis cache", k)
 		data := model.Data{
 			Raw:        v,
 			ModifyTime: now,
@@ -243,8 +246,11 @@ func (cache *CacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byt
 		cmds = append(cmds, pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout))
 	}
 
-	for i := 0; i < len(missKeys) && options.MissTimeout >= time.Millisecond; i++ {
-		cmds = append(cmds, pipe.Set(cache.mkRedisKey(missKeys[i]), missBytes, options.MissTimeout))
+	if options.MissTimeout >= time.Millisecond {
+		for _, key := range missKeys {
+			glog.Infoln("set redis miss cache", key)
+			cmds = append(cmds, pipe.Set(cache.mkRedisKey(key), missBytes, options.MissTimeout))
+		}
 	}
 
 	_, err := pipe.Exec()
