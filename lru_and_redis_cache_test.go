@@ -30,8 +30,8 @@ func (s *LRUAndRedisCacheSuite) SetupSuite() {
 		RedisCacheOptions: &levelcache.RedisCacheOptions{
 			Client:      getRedisClient(),
 			Prefix:      "levelcache.test.lru_and_redis",
-			HardTimeout: 1000 * time.Millisecond,
-			SoftTimeout: 800 * time.Millisecond,
+			HardTimeout: 2 * time.Second,
+			SoftTimeout: 1 * time.Second,
 			MissTimeout: 500 * time.Millisecond,
 		},
 		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
@@ -115,7 +115,6 @@ func (s *LRUAndRedisCacheSuite) TestMGet() {
 	value := "value"
 
 	patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte, error) {
-		t.Logf("arrive at loader: %v", keys)
 		s.hits = keys
 		return map[string][]byte{key: []byte(value)}, nil
 	})

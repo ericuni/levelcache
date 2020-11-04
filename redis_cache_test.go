@@ -26,8 +26,8 @@ func (s *RedisCacheSuite) SetupSuite() {
 		RedisCacheOptions: &levelcache.RedisCacheOptions{
 			Client:      getRedisClient(),
 			Prefix:      "levelcache.test.redis",
-			HardTimeout: 1000 * time.Millisecond,
-			SoftTimeout: 800 * time.Millisecond,
+			HardTimeout: 2 * time.Second,
+			SoftTimeout: 1 * time.Second,
 			MissTimeout: 500 * time.Millisecond,
 		},
 		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
