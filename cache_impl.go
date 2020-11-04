@@ -17,15 +17,16 @@ var (
 	missBytes = []byte("")
 )
 
-type cacheImpl struct {
+// CacheImpl cache implementation
+type CacheImpl struct {
 	name    string
 	options *Options
 
 	lruData *ccache.Cache
 }
 
-func newCacheImpl(name string, options *Options) *cacheImpl {
-	c := &cacheImpl{
+func newCacheImpl(name string, options *Options) *CacheImpl {
+	c := &CacheImpl{
 		name:    name,
 		options: options,
 	}
@@ -35,7 +36,8 @@ func newCacheImpl(name string, options *Options) *cacheImpl {
 	return c
 }
 
-func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string][]byte, map[string]bool, error) {
+// MGet .
+func (cache *CacheImpl) MGet(ctx context.Context, keys []string) (map[string][]byte, map[string]bool, error) {
 	if len(keys) == 0 {
 		return nil, nil, nil
 	}
@@ -79,7 +81,7 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string][]b
 	return valuesMap, validsMap, nil
 }
 
-func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
+func (cache *CacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
 	validsMap map[string]bool) []string {
 	if cache.options.LRUCacheOptions == nil {
 		return keys
@@ -123,7 +125,7 @@ func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, val
 	return missKeys
 }
 
-func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
+func (cache *CacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
 	validsMap map[string]bool) []string {
 	options := cache.options.RedisCacheOptions
 
@@ -178,11 +180,12 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 	return missKeys
 }
 
-func (cache *cacheImpl) MSet(ctx context.Context, kvs map[string][]byte) error {
+// MSet .
+func (cache *CacheImpl) MSet(ctx context.Context, kvs map[string][]byte) error {
 	return cache.mSet(ctx, kvs, nil)
 }
 
-func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
+func (cache *CacheImpl) mSet(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
 	if len(kvs) == 0 && len(missKeys) == 0 {
 		return nil
 	}
@@ -196,7 +199,7 @@ func (cache *cacheImpl) mSet(ctx context.Context, kvs map[string][]byte, missKey
 	return nil
 }
 
-func (cache *cacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte, missKeys []string) {
+func (cache *CacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte, missKeys []string) {
 	options := cache.options.LRUCacheOptions
 	if options == nil {
 		return
@@ -221,7 +224,7 @@ func (cache *cacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte,
 	}
 }
 
-func (cache *cacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
+func (cache *CacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byte, missKeys []string) error {
 	options := cache.options.RedisCacheOptions
 	if options == nil {
 		return nil
@@ -252,14 +255,15 @@ func (cache *cacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byt
 
 }
 
-func (cache *cacheImpl) mkRedisKey(key string) string {
+func (cache *CacheImpl) mkRedisKey(key string) string {
 	if options := cache.options.RedisCacheOptions; options != nil {
 		return options.Prefix + "_" + key
 	}
 	return key
 }
 
-func (cache *cacheImpl) MDel(ctx context.Context, keys []string) error {
+// MDel .
+func (cache *CacheImpl) MDel(ctx context.Context, keys []string) error {
 	if len(keys) == 0 {
 		return nil
 	}
