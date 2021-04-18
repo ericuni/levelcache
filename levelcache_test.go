@@ -3,6 +3,7 @@ package levelcache_test
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/ericuni/levelcache"
 	"github.com/go-redis/redis"
@@ -12,7 +13,7 @@ type LevelCacheTest struct {
 	cache   levelcache.Cache
 	ctx     context.Context
 	options *levelcache.Options
-	hits    []string // keys which arrive at loader
+	loaderRequestKeys    []string // keys which arrive at loader
 }
 
 func (s *LevelCacheTest) get(key string) (map[string]string, map[string]bool, error) {
@@ -43,4 +44,10 @@ func getRedisClient() *redis.Client {
 		panic(errors.New("init redis client error"))
 	}
 	return client
+}
+
+
+func waitAsyncRedis() {
+	// we could set redis async, so we give it some time
+	time.Sleep(10 * time.Millisecond)
 }

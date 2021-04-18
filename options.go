@@ -13,6 +13,7 @@ type Options struct {
 	LRUCacheOptions   *LRUCacheOptions
 	RedisCacheOptions *RedisCacheOptions
 	Loader            func(ctx context.Context, keys []string) (map[string][]byte, error)
+	CompressionType   CompressionType
 }
 
 // LRUCacheOptions lru cache options

@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/ericuni/errs"
-	"github.com/ericuni/glog"
-	"github.com/ericuni/levelcache/model"
 	"github.com/go-redis/redis"
+	"github.com/golang/glog"
 	"github.com/golang/protobuf/proto"
+	"github.com/golang/snappy"
 	"github.com/karlseguin/ccache"
 )
 
@@ -45,36 +45,57 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string][]b
 	valuesMap := make(map[string][]byte, len(keys))
 	validsMap := make(map[string]bool, len(keys))
 
-	missKeys := cache.mGetFromLRUCache(ctx, keys, valuesMap, validsMap)
-	if len(missKeys) == 0 {
+	lruMissKeys := cache.mGetFromLRUCache(ctx, keys, valuesMap, validsMap)
+	if len(lruMissKeys) == 0 {
 		return valuesMap, validsMap, nil
 	}
 
-	keys = missKeys
-	missKeys = cache.mGetFromRedisCache(ctx, keys, valuesMap, validsMap)
-	if len(missKeys) == 0 {
+	redisMissKeys := cache.mGetFromRedisCache(ctx, lruMissKeys, valuesMap, validsMap)
+
+	// set redis to lru
+	// if key is found in redis and value = missBytes, then key will not be added to missKeys, so key will appear in
+	// hitRedisKeys, and key may(still in lru but expired) or may not be in valuesMap. if key already in valuesMap,
+	// its lifetime will be extended, and if key not in, then it will be treated as miss key
+	redisHitKeys := substract(lruMissKeys, redisMissKeys)
+	if len(redisHitKeys) > 0 {
+		redisValues := make(map[string][]byte, len(redisHitKeys))
+		var emptyKeys []string
+		for _, key := range redisHitKeys {
+			if redisValue, ok := valuesMap[key]; ok {
+				redisValues[key] = redisValue
+			} else {
+				emptyKeys = append(emptyKeys, key)
+			}
+		}
+		cache.mSetLRUCache(ctx, redisValues, emptyKeys)
+	}
+
+	// hit redis all
+	if len(redisMissKeys) == 0 {
 		return valuesMap, validsMap, nil
 	}
 
-	keys = missKeys
-	values, err := cache.options.Loader(ctx, keys)
-	if err != nil {
-		return valuesMap, validsMap, errs.Trace(err)
+	if cache.options.Loader == nil {
+		return valuesMap, validsMap, nil
 	}
 
+	values, err := cache.options.Loader(ctx, redisMissKeys)
 	for k, v := range values {
 		valuesMap[k] = v
 		validsMap[k] = true
 	}
+	if err != nil {
+		return valuesMap, validsMap, errs.Trace(err)
+	}
 
-	missKeys = nil
-	for _, key := range keys {
+	var loaderMissKeys []string
+	for _, key := range redisMissKeys {
 		_, ok := values[key]
 		if !ok {
-			missKeys = append(missKeys, key)
+			loaderMissKeys = append(loaderMissKeys, key)
 		}
 	}
-	if err := cache.mSet(ctx, values, missKeys); err != nil {
+	if err := cache.mSet(ctx, values, loaderMissKeys); err != nil {
 		return valuesMap, validsMap, errs.Trace(err)
 	}
 
@@ -83,7 +104,7 @@ func (cache *cacheImpl) MGet(ctx context.Context, keys []string) (map[string][]b
 
 func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, valuesMap map[string][]byte,
 	validsMap map[string]bool) []string {
-	if cache.options.LRUCacheOptions == nil {
+	if cache.options.LRUCacheOptions == nil || len(keys) == 0 {
 		return keys
 	}
 
@@ -99,14 +120,14 @@ func (cache *cacheImpl) mGetFromLRUCache(ctx context.Context, keys []string, val
 			}
 
 			// loader once missed, so we return like it missed, but if already expired, we need to try next level
-			if bytes.Compare(bs, missBytes) == 0 {
+			if bytes.Equal(bs, missBytes) {
 				if item.Expired() {
 					missKeys = append(missKeys, key)
 				}
 				continue
 			}
 
-			data := model.Data{}
+			var data Data
 			err := proto.Unmarshal(bs, &data)
 			if err != nil {
 				missKeys = append(missKeys, key)
@@ -129,7 +150,7 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 	validsMap map[string]bool) []string {
 	options := cache.options.RedisCacheOptions
 
-	if options == nil {
+	if options == nil || len(keys) == 0 {
 		return keys
 	}
 
@@ -153,11 +174,11 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 		}
 
 		// loader miss
-		if bytes.Compare(v, missBytes) == 0 {
+		if bytes.Equal(v, missBytes) {
 			continue
 		}
 
-		data := model.Data{}
+		var data Data
 		err = proto.Unmarshal(v, &data)
 		if err != nil {
 			missKeys = append(missKeys, key)
@@ -165,15 +186,20 @@ func (cache *cacheImpl) mGetFromRedisCache(ctx context.Context, keys []string, v
 			continue
 		}
 
+		raw, err := decompress(data.CompressionType, data.Raw)
+		if err != nil {
+			glog.Errorf("%s redis %s decompress error +%v", cache.name, key, err)
+		}
+
 		if now.Sub(time.Unix(data.ModifyTime, 0)) <= options.SoftTimeout {
-			valuesMap[key] = data.Raw
+			valuesMap[key] = raw
 			validsMap[key] = true
 			continue
 		}
 
 		// lrucache expired has higher priority over redis cache soft expired
 		if _, ok := valuesMap[key]; !ok {
-			valuesMap[key] = data.Raw
+			valuesMap[key] = raw
 		}
 		missKeys = append(missKeys, key)
 	}
@@ -207,9 +233,10 @@ func (cache *cacheImpl) mSetLRUCache(ctx context.Context, kvs map[string][]byte,
 
 	now := time.Now().Unix()
 	for k, v := range kvs {
-		data := model.Data{
-			Raw:        v,
-			ModifyTime: now,
+		data := Data{
+			Raw:             v,
+			ModifyTime:      now,
+			CompressionType: CompressionType_None,
 		}
 		bs, _ := proto.Marshal(&data)
 		cache.lruData.Set(k, bs, options.Timeout)
@@ -233,19 +260,19 @@ func (cache *cacheImpl) mSetRedisCache(ctx context.Context, kvs map[string][]byt
 	now := time.Now().Unix()
 	pipe := options.Client.Pipeline()
 	defer pipe.Close()
-	var cmds []*redis.StatusCmd
 	for k, v := range kvs {
-		data := model.Data{
-			Raw:        v,
-			ModifyTime: now,
+		data := Data{
+			Raw:             compress(cache.options.CompressionType, v),
+			ModifyTime:      now,
+			CompressionType: cache.options.CompressionType,
 		}
 		bs, _ := proto.Marshal(&data)
-		cmds = append(cmds, pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout))
+		pipe.Set(cache.mkRedisKey(k), bs, options.HardTimeout)
 	}
 
 	if options.MissTimeout >= time.Millisecond {
 		for _, key := range missKeys {
-			cmds = append(cmds, pipe.Set(cache.mkRedisKey(key), missBytes, options.MissTimeout))
+			pipe.Set(cache.mkRedisKey(key), missBytes, options.MissTimeout)
 		}
 	}
 
@@ -287,4 +314,45 @@ func (cache *cacheImpl) MDel(ctx context.Context, keys []string) error {
 		}
 	}
 	return nil
+}
+
+func substract(x, y []string) []string {
+	c := make(map[string]bool, len(y))
+	for _, e := range y {
+		c[e] = true
+	}
+
+	var diff []string
+	for _, e := range x {
+		if !c[e] {
+			diff = append(diff, e)
+		}
+	}
+	return diff
+}
+
+func compress(compressionType CompressionType, bs []byte) []byte {
+	switch compressionType {
+	case CompressionType_None:
+		return bs
+	case CompressionType_Snappy:
+		return snappy.Encode(nil, bs)
+	default:
+		return bs
+	}
+}
+
+func decompress(compressionType CompressionType, bs []byte) ([]byte, error) {
+	switch compressionType {
+	case CompressionType_None:
+		return bs, nil
+	case CompressionType_Snappy:
+		decompressed, err := snappy.Decode(nil, bs)
+		if err != nil {
+			return nil, errs.Trace(err)
+		}
+		return decompressed, nil
+	default:
+		return nil, errs.New("unknown compress type %v", compressionType)
+	}
 }

@@ -8,49 +8,56 @@ import (
 
 	"github.com/agiledragon/gomonkey"
 	"github.com/ericuni/levelcache"
+	"github.com/go-redis/redis"
 	"github.com/stretchr/testify/suite"
 )
 
 type RedisCacheSuite struct {
 	suite.Suite
 	LevelCacheTest
-	keys []string // will be deleted from redis before every test
+	client *redis.Client
+	keys   []string // will be deleted from redis before every test
 }
 
 func (s *RedisCacheSuite) SetupSuite() {
-	assert := s.Assert()
+	s.client = getRedisClient()
+}
 
-	s.ctx = context.Background()
+func (s *RedisCacheSuite) SetupTest() {
+	assert := s.Assert()
+	t := s.T()
+
+	ctx := context.Background()
+	s.ctx = ctx
 
 	options := levelcache.Options{
 		RedisCacheOptions: &levelcache.RedisCacheOptions{
-			Client:      getRedisClient(),
+			Client:      s.client,
 			Prefix:      "levelcache.test.redis",
-			HardTimeout: 2 * time.Second,
-			SoftTimeout: 1 * time.Second,
+			HardTimeout: 11 * time.Second,
+			SoftTimeout: 10 * time.Second,
 			MissTimeout: 500 * time.Millisecond,
 		},
 		Loader: func(ctx context.Context, keys []string) (map[string][]byte, error) {
-			s.hits = keys
+			t.Logf("loader request: %v", keys)
+			s.loaderRequestKeys = keys
 			return nil, nil
 		},
 	}
 	s.options = &options
 
-	cache := levelcache.NewCache("redis", s.options)
+	cache := levelcache.NewCache("levelcache.test.redis", s.options)
 	assert.NotNil(cache)
 	s.cache = cache
 
+	s.loaderRequestKeys = nil
 	s.keys = []string{"k1", "k2"}
-}
-
-func (s *RedisCacheSuite) SetupTest() {
-	assert := s.Assert()
-
-	s.hits = nil
 
 	err := s.cache.MDel(s.ctx, s.keys)
 	assert.Nil(err)
+}
+
+func (s *RedisCacheSuite) TearDownTest() {
 }
 
 func (s *RedisCacheSuite) TestMDel() {
@@ -62,25 +69,27 @@ func (s *RedisCacheSuite) TestMDel() {
 
 	patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
 		error) {
-		s.hits = keys
+		s.loaderRequestKeys = keys
 		return map[string][]byte{key: []byte(value)}, nil
 	})
 	defer patches.Reset()
 
 	t.Run("hit loader", func(t *testing.T) {
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Equal([]string{key}, s.hits)
+		assert.Equal([]string{key}, s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Equal(value, values[key])
 		assert.True(valids[key])
 	})
 
+	waitAsyncRedis()
+
 	t.Run("hit cache", func(t *testing.T) {
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Empty(s.hits)
+		assert.Empty(s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Equal(value, values[key])
@@ -93,9 +102,9 @@ func (s *RedisCacheSuite) TestMDel() {
 	})
 
 	t.Run("hit loader agagin", func(t *testing.T) {
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Equal([]string{key}, s.hits)
+		assert.Equal([]string{key}, s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Equal(value, values[key])
@@ -145,27 +154,28 @@ func (s *RedisCacheSuite) TestHitLoader() {
 	t.Run("hittable loader", func(t *testing.T) {
 		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
 			error) {
-			s.hits = keys
+			t.Logf("loader request: %v", keys)
+			s.loaderRequestKeys = keys
 			return map[string][]byte{key: []byte(value)}, nil
 		})
 		defer patches.Reset()
 
 		t.Run("hit loader", func(t *testing.T) {
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Equal([]string{key}, s.hits)
+			assert.Equal([]string{key}, s.loaderRequestKeys)
 
 			assert.Nil(err)
 			assert.Equal(value, values[key])
 			assert.True(valids[key])
 		})
 
-		// TODO: sometimes it would fail, do not know why
-		// reids cache is set undoubtedly
+		waitAsyncRedis()
+
 		t.Run("hit cache", func(t *testing.T) {
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Empty(s.hits)
+			assert.Empty(s.loaderRequestKeys)
 
 			assert.Nil(err)
 			assert.Equal(value, values[key])
@@ -175,9 +185,9 @@ func (s *RedisCacheSuite) TestHitLoader() {
 		t.Run("soft timeout and hit loader agagin", func(t *testing.T) {
 			time.Sleep(s.options.RedisCacheOptions.SoftTimeout + 10*time.Millisecond)
 
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Equal([]string{key}, s.hits)
+			assert.Equal([]string{key}, s.loaderRequestKeys)
 
 			assert.Nil(err)
 			assert.Equal(value, values[key])
@@ -187,9 +197,9 @@ func (s *RedisCacheSuite) TestHitLoader() {
 		t.Run("hard timeout and hit loader agagin", func(t *testing.T) {
 			time.Sleep(s.options.RedisCacheOptions.HardTimeout + 10*time.Millisecond)
 
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Equal([]string{key}, s.hits)
+			assert.Equal([]string{key}, s.loaderRequestKeys)
 
 			assert.Nil(err)
 			assert.Equal(value, values[key])
@@ -200,7 +210,7 @@ func (s *RedisCacheSuite) TestHitLoader() {
 	t.Run("loader error", func(t *testing.T) {
 		patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
 			error) {
-			s.hits = keys
+			s.loaderRequestKeys = keys
 			return nil, errors.New("loader error")
 		})
 		defer patches.Reset()
@@ -208,9 +218,9 @@ func (s *RedisCacheSuite) TestHitLoader() {
 		t.Run("soft timeout and loader error", func(t *testing.T) {
 			time.Sleep(s.options.RedisCacheOptions.SoftTimeout + 10*time.Millisecond)
 
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Equal([]string{key}, s.hits)
+			assert.Equal([]string{key}, s.loaderRequestKeys)
 
 			assert.NotNil(err)
 			assert.Equal(value, values[key])
@@ -220,9 +230,9 @@ func (s *RedisCacheSuite) TestHitLoader() {
 		t.Run("hard timeout and loader error", func(t *testing.T) {
 			time.Sleep(s.options.RedisCacheOptions.HardTimeout + 10*time.Millisecond)
 
-			s.hits = nil
+			s.loaderRequestKeys = nil
 			values, valids, err := s.get(key)
-			assert.Equal([]string{key}, s.hits)
+			assert.Equal([]string{key}, s.loaderRequestKeys)
 
 			assert.NotNil(err)
 			assert.Empty(values)
@@ -238,19 +248,21 @@ func (s *RedisCacheSuite) TestMiss() {
 	key := s.keys[0]
 
 	t.Run("loader miss", func(t *testing.T) {
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Equal([]string{key}, s.hits)
+		assert.Equal([]string{key}, s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Empty(values)
 		assert.Empty(valids)
 	})
 
+	waitAsyncRedis()
+
 	t.Run("hit cache", func(t *testing.T) {
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Empty(s.hits)
+		assert.Empty(s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Empty(values)
@@ -259,9 +271,9 @@ func (s *RedisCacheSuite) TestMiss() {
 
 	t.Run("miss timeout and loader miss agagin", func(t *testing.T) {
 		time.Sleep(s.options.RedisCacheOptions.MissTimeout + 10*time.Millisecond)
-		s.hits = nil
+		s.loaderRequestKeys = nil
 		values, valids, err := s.get(key)
-		assert.Equal([]string{key}, s.hits)
+		assert.Equal([]string{key}, s.loaderRequestKeys)
 
 		assert.Nil(err)
 		assert.Empty(values)
@@ -269,6 +281,44 @@ func (s *RedisCacheSuite) TestMiss() {
 	})
 }
 
+func (s *RedisCacheSuite) TestCompression() {
+	assert := s.Assert()
+
+	options := s.options
+	options.CompressionType = levelcache.CompressionType_Snappy
+	cache := levelcache.NewCache("redis_cache.test.redis.compression", options)
+	assert.NotNil(cache)
+	s.cache = cache
+
+	key := "key"
+	value := "bigvalue_xxxxxxxxxxxx_bigvalue"
+
+	patches := gomonkey.ApplyFunc(s.options.Loader, func(ctx context.Context, keys []string) (map[string][]byte,
+		error) {
+		s.loaderRequestKeys = keys
+		return map[string][]byte{key: []byte(value)}, nil
+	})
+	defer patches.Reset()
+
+	// hit loader
+	valuesMap, validsMap, err := s.get(key)
+	assert.Nil(err)
+	assert.Equal(value, valuesMap[key])
+	assert.True(validsMap[key])
+	assert.Equal([]string{key}, s.loaderRequestKeys)
+
+	waitAsyncRedis()
+
+	s.loaderRequestKeys = nil
+	// hit cache
+	valuesMap, validsMap, err = s.get(key)
+	assert.Nil(err)
+	assert.Equal(value, valuesMap[key])
+	assert.True(validsMap[key])
+	assert.Empty(s.loaderRequestKeys)
+}
+
 func TestRedisCache(t *testing.T) {
 	suite.Run(t, new(RedisCacheSuite))
 }
+
